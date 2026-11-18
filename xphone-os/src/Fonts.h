@@ -14,3 +14,6 @@ extern const XpFont kFontSmall;
 // Big display numerals (digits, '/', space only), rendered at size from the
 // TTF so they stay crisp instead of pixel-doubling the 12pt face.
 extern const XpFont kFontDigitsXL;  // Ubuntu Bold 64pt
+// Speed Read phrases: Latin-1, Latin Extended-A and general punctuation
+// (curly quotes, dashes) so book text never falls back to "?".
+extern const XpFont kFontSpeed;     // Ubuntu Bold 22pt

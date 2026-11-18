@@ -51,6 +51,9 @@ class ReaderScene : public Scene {
   // custom build: the next onEnter shows the book list instead of resuming
   // the last book (the launcher's Read tile). Wake restore still resumes.
   void openShelfNext() { _shelfNext = true; }
+  // custom build: the next book that reaches its page starts in Speed Read
+  // (the launcher's Speed tile). Cleared on exit.
+  void openSpeedNext() { _spPending = true; }
   // Bench dev console ("where" v2): sub-state + selection one-liner —
   // dead-reckoning from "scene=reader" alone opened a real book once.
   void debugWhere(char* out, size_t n) const;
@@ -415,4 +418,41 @@ class ReaderScene : public Scene {
   bool _sdOk = true;        // card mounted when the scan ran
   int16_t _wCache = 0;
   int16_t _hCache = 0;
+
+  // --- Speed Read (custom build; ReaderSpeed.cpp) ----------------------------
+  // Phrase-at-a-time reading from the open book's current page. The X4's
+  // panel needs ~0.6 s per change (Scene.cpp: a full-panel FAST is 594 ms),
+  // so one word per flash would cap near 100 wpm; a short phrase per flash
+  // reaches normal-to-fast reading speeds. Words come from the page the
+  // reader already laid out (EPUB: the section page's lines; package: the
+  // v8 word boxes), so the place you stop is the place the book resumes.
+  static constexpr uint16_t kSpMaxWords = 400;
+  static constexpr uint16_t kSpPool = 3072;
+  static constexpr uint16_t kSpMinWpm = 100;
+  static constexpr uint16_t kSpMaxWpm = 600;
+  static constexpr uint32_t kSpMinFlashMs = 700;  // panel refresh + a beat to read
+  bool _spPending = false;    // enter Speed Read once a page is up
+  bool _spMode = false;
+  bool _spPlaying = false;
+  bool _spNeedWords = true;   // (re)load the current page's words at render
+  bool _spNoWords = false;    // this book cannot be read word by word
+  bool _spEnd = false;        // the last phrase of the book is showing
+  int8_t _spEdge = 0;         // after a backward turn: start on the last phrase
+  uint16_t _spWpm = 300;
+  uint16_t _spCount = 0;      // words on this page
+  uint16_t _spIdx = 0;        // first word of the phrase on glass
+  uint16_t _spOff[kSpMaxWords];
+  char _spPool[kSpPool];
+  uint32_t _spNextMs = 0;
+  void enterSpeed();
+  void exitSpeed();
+  void handleSpeedInput(Input& in);
+  void renderSpeed(Gfx& gfx);
+  void speedLoadWords(Gfx& gfx);
+  bool speedAddWord(const char* w, size_t len);
+  uint16_t speedPhraseLen(uint16_t idx) const;
+  void speedAdvance();
+  void speedBack();
+  void speedTurn(bool forward);
+  uint32_t speedIntervalMs(uint16_t words) const;
 };

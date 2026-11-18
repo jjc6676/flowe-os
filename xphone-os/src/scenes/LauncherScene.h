@@ -1,6 +1,7 @@
 #pragma once
 
-// xphone-os — launcher: status bar + 3x2 app grid (Notifications/Read/Today/
+// xphone-os — launcher: status bar + 2x2 app grid in this custom build
+// (Notifications/Read/Lorcana/Speed Read; upstream: Notifications/Read/Today/
 // Priorities/Block/Workout). Settings opens from the BACK soft-key; About
 // lives in Settings. Icon bitmaps come from IconStyle (multi-pack).
 
@@ -15,7 +16,7 @@ class LauncherScene : public Scene {
   uint8_t softKeyIconMask() const override { return 0x01; }  // Settings = gear tab
 
   static constexpr int COLS = 2;
-  static constexpr int APP_COUNT = 3;  // custom build: Notifications / Read / Lorcana
+  static constexpr int APP_COUNT = 4;  // custom build: Notifications / Read / Lorcana / Speed Read
 
   // Bench dev console ("where"): expose the grid selection so remote
   // navigation is fact-based, never dead reckoning.

@@ -90,6 +90,11 @@ void showReader() {
   SCENES.switchTo(gReader);
 }
 
+void showReaderSpeed() {
+  gReader.openSpeedNext();
+  showReader();
+}
+
 void showReaderShelf() {
   gReader.openShelfNext();
   showReader();

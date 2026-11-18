@@ -18,6 +18,7 @@
 #include "fonts/ubuntu_10_regular_ascii.h"
 #include "fonts/ubuntu_12_bold_ascii.h"
 #include "fonts/ubuntu_12_regular_ascii.h"
+#include "fonts/ubuntu_22_bold_text.h"
 #include "fonts/ubuntu_64_bold_digits.h"
 
 const XpFont kFontRegular = {
@@ -60,3 +61,12 @@ const XpFont kFontDigitsXL = {
     125,  // ascender
 };
 
+
+const XpFont kFontSpeed = {
+    ubuntu_22_bold_textBitmaps,
+    ubuntu_22_bold_textGlyphs,
+    ubuntu_22_bold_textIntervals,
+    sizeof(ubuntu_22_bold_textIntervals) / sizeof(ubuntu_22_bold_textIntervals[0]),
+    53,  // advanceY
+    43,  // ascender
+};

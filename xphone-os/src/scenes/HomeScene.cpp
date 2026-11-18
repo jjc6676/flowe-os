@@ -35,7 +35,7 @@ constexpr const char* kPrefsTilesKey = "homeTiles";   // csv of builtin ids
 constexpr const char* kPrefsWidgetsKey = "homeWdgts"; // csv of builtin ids
 constexpr const char* kPrefsSlotsKey = "homeSlots";   // csv, launcher slots
 // custom build: Today/Priorities/Block/Workout removed from the launcher.
-constexpr const char* kDefaultSlots = "notifications,read,lorcana";
+constexpr const char* kDefaultSlots = "notifications,read,lorcana,speed";
 
 
 // Geometry (logical portrait; both panels). Same margins as the V2 mock,

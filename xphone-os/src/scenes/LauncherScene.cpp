@@ -81,7 +81,8 @@ void LauncherScene::loadSlots() {
   static constexpr Builtin kBuiltins[] = {
       // custom build: Today, Priorities, Block and Workout are not offered.
       // Lorcana has no bitmap in LauncherIcons, so it draws the monogram tile.
-      {"notifications", "Notifications", 1}, {"read", "Read", 4}, {"lorcana", "Lorcana", -1}};
+      {"notifications", "Notifications", 1}, {"read", "Read", 4}, {"lorcana", "Lorcana", -1},
+      {"speed", "Speed Read", -1}};
   char csv[224];
   homeSlotsCsv(csv, sizeof(csv));
   // A saved layout that names an app the card no longer holds is stale, and
@@ -202,7 +203,7 @@ void LauncherScene::loadSlots() {
 
 void LauncherScene::moveSelection(const int dCol, const int dRow) {
   int sel = _sel;
-  // Front Left/Right = linear PREV/NEXT with wrap (Workout↔Today).
+  // Front Left/Right = linear PREV/NEXT with wrap (last tile <-> first).
   // Up/Down move by row and still clamp (no wrap) so a short last row feels
   // predictable.
   if (dCol != 0) {
@@ -257,6 +258,8 @@ void LauncherScene::handleInput(Input& in) {
       showReaderShelf();
     } else if (strcmp(id, "lorcana") == 0) {
       showLorcana();
+    } else if (strcmp(id, "speed") == 0) {
+      showReaderSpeed();
     } else {
       if (!showApp(id)) markDirty();  // a missing app just repaints the grid
     }

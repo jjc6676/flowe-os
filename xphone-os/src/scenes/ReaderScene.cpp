@@ -433,6 +433,9 @@ void ReaderScene::suspendRadioForBookWork() {
 }
 
 void ReaderScene::onExit() {
+  _spMode = false;  // custom build: Speed Read never survives leaving the reader
+  _spPlaying = false;
+  _spPending = false;
   _fbForLoan = nullptr;  // no framebuffer borrow may survive this scene
   // Capture the pagination BEFORE the book state is torn down below, for the
   // place we hand the phone at the end (item 6 step 3).
@@ -562,6 +565,13 @@ const char* const* ReaderScene::softKeys() const {
 #endif
   switch (_state) {
     case State::Reading:
+      if (_spMode) {  // custom build: Speed Read
+        static constexpr const char* kSpeedPlay[4] = {"EXIT", "PLAY", SoftKey::Left, SoftKey::Right};
+        static constexpr const char* kSpeedPause[4] = {"EXIT", "PAUSE", SoftKey::Left, SoftKey::Right};
+        static constexpr const char* kSpeedEnd[4] = {"EXIT", "OK", SoftKey::Left, nullptr};
+        if (_spEnd) return kSpeedEnd;
+        return _spPlaying ? kSpeedPause : kSpeedPlay;
+      }
       if (_hlMode) return kHlPick;
       if (_wcMode) return _wcSheet ? kWordSheet : (land ? kWordPickL : kWordPick);
       if (_endOffer) return _offerFromPhone ? kEndOffer : kEndDone;
@@ -1092,6 +1102,7 @@ enum MenuRow : uint8_t {
   kMenuRowKeyLabels,
   kMenuRowFooter,
   kMenuRowStats,
+  kMenuRowSpeed,  // custom build: Speed Read
   kMenuRowCount,
 };
 
@@ -1114,6 +1125,7 @@ static int menuRows(bool isFbp, bool landscapeReady, bool notesHere, MenuRow* ou
   if (isFbp) out[n++] = kMenuRowGoTo;
   out[n++] = kMenuRowBookmark;
   out[n++] = kMenuRowBookmarks;
+  out[n++] = kMenuRowSpeed;  // custom build
   if (isFbp) out[n++] = kMenuRowOrientation;
   if (isFbp) out[n++] = kMenuRowHighlight;
   if (isFbp) out[n++] = kMenuRowLookUp;
@@ -1482,6 +1494,10 @@ void ReaderScene::menuSelect() {
     case kMenuRowStats:
       _menu = MenuView::StatsBook;
       markDirty();
+      return;
+    case kMenuRowSpeed:
+      _menu = MenuView::None;
+      enterSpeed();
       return;
     default:
       return;
@@ -2528,6 +2544,10 @@ void ReaderScene::handleInput(Input& in) {
         if (in.wasPressed(Btn::Back)) enterBookList();
         return;
       }
+      if (_spMode) {  // custom build: Speed Read
+        handleSpeedInput(in);
+        return;
+      }
       if (_hlMode) {
         handleHlInput(in);
         return;
@@ -2805,6 +2825,8 @@ bool ReaderScene::shelfQuietBuildPending() const {
 }
 
 void ReaderScene::enterBookList() {
+  _spMode = false;  // custom build: the shelf is never a speed-read screen
+  _spPlaying = false;
   const uint32_t tEnter = millis();
   reader::ReadingStats::sessionEnd();  // flush before the grid repaints (band shows fresh numbers)
   COMPANION_BLE.clearReaderPos();  // F1: the stream ends with the BOOK, not the scene —
@@ -3684,6 +3706,16 @@ bool ReaderScene::applyOrientation(Gfx& gfx, const bool toLandscape, const bool 
 }
 
 void ReaderScene::renderReading(Gfx& gfx) {
+  // custom build: Speed Read. The launcher's Speed tile arms _spPending so
+  // whichever book opens next starts in it.
+  if (_spPending && _menu == MenuView::None && !_wcMode && !_hlMode) {
+    _spPending = false;
+    enterSpeed();
+  }
+  if (_spMode) {
+    renderSpeed(gfx);
+    return;
+  }
   // Full-page menu views replace the page; strip views draw over it.
   if (_menu == MenuView::Page) {
     renderMenuPage(gfx);
@@ -4006,6 +4038,10 @@ void ReaderScene::renderMenuBody(Gfx& gfx, int y) {
         break;
       }
       case kMenuRowStats: name = "Book stats"; break;
+      case kMenuRowSpeed:
+        name = "Speed read";
+        snprintf(value, sizeof(value), "%u wpm", static_cast<unsigned>(_spWpm));
+        break;
       default: break;
     }
     const bool sel = i == _menuSel;
