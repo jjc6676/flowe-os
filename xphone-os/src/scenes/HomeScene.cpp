@@ -34,7 +34,7 @@ constexpr const char* kPrefsLayoutKey = "homeLay";   // 0 = Tiles, 1 = Widget
 constexpr const char* kPrefsTilesKey = "homeTiles";   // csv of builtin ids
 constexpr const char* kPrefsWidgetsKey = "homeWdgts"; // csv of builtin ids
 constexpr const char* kPrefsSlotsKey = "homeSlots";   // csv, launcher slots
-// flowe-lorcana: Today/Priorities/Block/Workout removed from the launcher.
+// custom build: Today/Priorities/Block/Workout removed from the launcher.
 constexpr const char* kDefaultSlots = "notifications,read,lorcana";
 
 

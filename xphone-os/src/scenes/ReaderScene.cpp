@@ -368,7 +368,9 @@ void ReaderScene::onEnter() {
       prefs.end();
     }
   }
-  if (path[0] != '\0' && Storage.exists(path)) {
+  const bool shelfFirst = _shelfNext;
+  _shelfNext = false;
+  if (!shelfFirst && path[0] != '\0' && Storage.exists(path)) {
     _bookPath = path;
     _prefetchAttemptedSpine = -1;
     _state = State::Opening;

@@ -118,7 +118,7 @@ void composeSleepScreen(Gfx& gfx, const bool napping) {
   // the Widget home; the Priorities hero falls through to the poster below,
   // which is that hero. Same footer and the same moon-and-state line as the
   // other faces, so every rest screen reads as one design.
-  // flowe-lorcana: Priorities, Today, Block and Workout are gone, so the
+  // custom build: Priorities, Today, Block and Workout are gone, so the
   // poster no longer draws their list, calendar line or block line. Sleeping
   // from the Lorcana counter keeps the score on the glass; anything else
   // gets the wordmark and the wake hint.

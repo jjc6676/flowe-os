@@ -1,20 +1,19 @@
 #pragma once
 
-// flowe-lorcana — Lorcana: one player's lore and ink, counted on the device.
+// custom build — Lorcana: one player's lore and ink drops, counted on the
+// device.
 //
-// Nothing here talks to the phone. The three numbers live in NVS
-// ("lorcana" namespace) and are written on every change, so a game survives
-// sleep, a power-off and a firmware update.
+// Nothing here talks to the phone. Both numbers live in NVS ("lorcana"
+// namespace) and are written on every change, so a game survives sleep, a
+// power-off and a firmware update.
 //
 // Controls (X4: Up/Down are the two side buttons):
 //   side Up        = lore +1 (20 wins; it keeps counting past 20)
 //   side Down      = lore -1
-//   CONFIRM        = ink a card (inkwell +1, and that ink is ready)
-//   hold CONFIRM   = new turn: ready all ink
-//   Left           = spend 1 ink
-//   Right          = undo a spend (ready +1, never above the inkwell)
-//   hold Right     = take a card back out of the inkwell (fix a mis-press)
-//   hold Left      = new game (lore 0, inkwell empty)
+//   Left           = ink drops -1
+//   Right          = ink drops +1
+//   hold CONFIRM   = new game (both back to 0). A tap only shows the hint,
+//                    so a stray press mid-game never wipes the score.
 //   BACK           = launcher
 //
 // renderDormant() is the sleep face used when the device sleeps FROM this
@@ -30,22 +29,23 @@ class LorcanaScene : public Scene {
   void handleInput(Input& in) override;
   void render(Gfx& gfx) override;
   const char* const* softKeys() const override;
-  // Long-press dots on the CONFIRM, LEFT and RIGHT tabs.
-  uint8_t longPressSlots() const override { return 0x0E; }
+  // Long-press dot on the CONFIRM (NEW GAME) tab.
+  uint8_t longPressSlots() const override { return 0x02; }
 
-  // Sleep face: lore and ink, big. Always draws (a zeroed game is still a
-  // game). Never flushes.
+  // Sleep face: lore and ink, big. Always draws. Never flushes.
   static bool renderDormant(Gfx& gfx);
 
   static constexpr int kWinLore = 20;
-  static constexpr int kMaxLore = 99;
-  static constexpr int kMaxInk = 60;  // a whole deck, more than any real game
+  static constexpr int kMax = 99;
 
  private:
   XpRect loreRect() const;
   XpRect inkRect() const;
+  XpRect hintRect() const;
+
+  bool _confirmHint = false;  // a tap on NEW GAME: say "hold" in the hint line
 
   // Layout cached by render() for partial repaints; empty until first paint.
-  int16_t _w = 0, _h = 0;
-  int16_t _loreTop = 0, _loreH = 0, _inkTop = 0, _inkH = 0;
+  int16_t _w = 0;
+  int16_t _loreTop = 0, _loreH = 0, _inkTop = 0, _inkH = 0, _hintTop = 0, _hintH = 0;
 };

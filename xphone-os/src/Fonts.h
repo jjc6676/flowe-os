@@ -11,3 +11,6 @@ extern const XpFont kFontRegular;
 extern const XpFont kFontBold;
 // M3: 10pt regular — soft-key tab labels only (subset like the 12pt pair).
 extern const XpFont kFontSmall;
+// Big display numerals (digits, '/', space only), rendered at size from the
+// TTF so they stay crisp instead of pixel-doubling the 12pt face.
+extern const XpFont kFontDigitsXL;  // Ubuntu Bold 64pt

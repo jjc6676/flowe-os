@@ -15,7 +15,7 @@ class LauncherScene : public Scene {
   uint8_t softKeyIconMask() const override { return 0x01; }  // Settings = gear tab
 
   static constexpr int COLS = 2;
-  static constexpr int APP_COUNT = 3;  // flowe-lorcana: Notifications / Read / Lorcana
+  static constexpr int APP_COUNT = 3;  // custom build: Notifications / Read / Lorcana
 
   // Bench dev console ("where"): expose the grid selection so remote
   // navigation is fact-based, never dead reckoning.

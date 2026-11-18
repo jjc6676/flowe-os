@@ -36,7 +36,7 @@ enum class SceneId : uint32_t {
   FileTransfer = 9,
   Wifi = 10,
   Home = 11,  // Widget home layout (Phase 2)
-  Lorcana = 12,  // Lorcana lore + ink counter (flowe-lorcana fork)
+  Lorcana = 12,  // Lorcana lore + ink counter (custom build)
 };
 
 // Single source of truth for "what scene is on glass" — set by every show*()
@@ -65,6 +65,7 @@ void showBlockDeepWork();  // Launcher top-right long-press: open Block + start 
 void showPriorities();  // M3: real Priorities scene (to-do snapshot via BLE)
 void showToday();       // M3: real Today scene (agenda/reminders/weather card)
 void showReader();      // R1 EPUB reader (resumes the last book; book list on BACK)
+void showReaderShelf(); // custom build: the reader, opened on the book list (launcher Read)
 void showWorkout();     // Workout: set-by-set exercise tracker synced from iPhone
 void showLorcana();     // Lorcana: lore + ink counter (local only, kept in NVS)
 // Declarative app (Phase 1: bench dev console "app <name>"). Loads

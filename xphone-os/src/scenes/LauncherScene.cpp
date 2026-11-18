@@ -79,7 +79,7 @@ void LauncherScene::loadSlots() {
   // Builtin id -> launcher icon index + label (LauncherIcons.h app order).
   struct Builtin { const char* id; const char* label; int8_t icon; };
   static constexpr Builtin kBuiltins[] = {
-      // flowe-lorcana: Today, Priorities, Block and Workout are not offered.
+      // custom build: Today, Priorities, Block and Workout are not offered.
       // Lorcana has no bitmap in LauncherIcons, so it draws the monogram tile.
       {"notifications", "Notifications", 1}, {"read", "Read", 4}, {"lorcana", "Lorcana", -1}};
   char csv[224];
@@ -243,7 +243,7 @@ XpRect LauncherScene::cellRect(const int i) const {
 }
 
 void LauncherScene::handleInput(Input& in) {
-  // flowe-lorcana: the Deep Work long-press is gone with the Block app.
+  // custom build: the Deep Work long-press is gone with the Block app.
   if (in.wasPressed(Btn::Left)) moveSelection(-1, 0);
   if (in.wasPressed(Btn::Right)) moveSelection(+1, 0);
   if (in.wasPressed(Btn::Up)) moveSelection(0, -1);
@@ -254,7 +254,7 @@ void LauncherScene::handleInput(Input& in) {
     if (strcmp(id, "notifications") == 0) {
       showNotifications();
     } else if (strcmp(id, "read") == 0) {
-      showReader();
+      showReaderShelf();
     } else if (strcmp(id, "lorcana") == 0) {
       showLorcana();
     } else {

@@ -90,6 +90,11 @@ void showReader() {
   SCENES.switchTo(gReader);
 }
 
+void showReaderShelf() {
+  gReader.openShelfNext();
+  showReader();
+}
+
 void showWorkout() {
   gCurrentSceneId = SceneId::Workout;
   SCENES.switchTo(gWorkout);
@@ -165,7 +170,7 @@ void showSceneById(SceneId id) {
     // FileTransfer deliberately NOT restored: waking straight into a scene
     // that would show a stale Idle menu (the radio never survives sleep)
     // helps nobody — fall through to the launcher.
-    // flowe-lorcana: Block, Priorities, Today and Workout are no longer
+    // custom build: Block, Priorities, Today and Workout are no longer
     // offered, so a restore id saved by the stock firmware must not reopen
     // them — they land on the launcher too.
     case SceneId::Block:

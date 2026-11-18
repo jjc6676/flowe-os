@@ -18,6 +18,7 @@
 #include "fonts/ubuntu_10_regular_ascii.h"
 #include "fonts/ubuntu_12_bold_ascii.h"
 #include "fonts/ubuntu_12_regular_ascii.h"
+#include "fonts/ubuntu_64_bold_digits.h"
 
 const XpFont kFontRegular = {
     ubuntu_12_regularBitmaps,
@@ -47,3 +48,15 @@ const XpFont kFontSmall = {
     24,  // advanceY
     20,  // ascender
 };
+
+// Big numerals for counters. Metrics from FreeType at 150 dpi, the same
+// recipe that reproduces the 12pt faces above (advanceY 29 / ascender 24).
+const XpFont kFontDigitsXL = {
+    ubuntu_64_bold_digitsBitmaps,
+    ubuntu_64_bold_digitsGlyphs,
+    ubuntu_64_bold_digitsIntervals,
+    sizeof(ubuntu_64_bold_digitsIntervals) / sizeof(ubuntu_64_bold_digitsIntervals[0]),
+    153,  // advanceY
+    125,  // ascender
+};
+

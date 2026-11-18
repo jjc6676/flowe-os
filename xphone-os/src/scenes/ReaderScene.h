@@ -48,6 +48,9 @@ class ReaderScene : public Scene {
   // the page is still on glass (sync in place, 2026-09-05). The first
   // paint is the page itself, a differential refresh of the same pixels.
   void resumeQuietly() { _quietReopen = true; }
+  // custom build: the next onEnter shows the book list instead of resuming
+  // the last book (the launcher's Read tile). Wake restore still resumes.
+  void openShelfNext() { _shelfNext = true; }
   // Bench dev console ("where" v2): sub-state + selection one-liner —
   // dead-reckoning from "scene=reader" alone opened a real book once.
   void debugWhere(char* out, size_t n) const;
@@ -206,6 +209,7 @@ class ReaderScene : public Scene {
   State _state = State::BookList;
   Work _work = Work::None;
   bool _workArmed = false;
+  bool _shelfNext = false;
   bool _quietReopen = false;  // render() composed the frame announcing _work
 
   // Engine objects — created on open, freed in onExit (CrossPoint activity

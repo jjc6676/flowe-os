@@ -95,10 +95,18 @@ def main():
         i = args.index("--verify-against")
         verify_path = args[i + 1]
         del args[i : i + 2]
+    # --ranges 0x20-0x20,0x2F-0x39: override RANGES (e.g. a digits-only
+    # display face for big numerals).
+    global RANGES
+    if "--ranges" in args:
+        i = args.index("--ranges")
+        RANGES = [tuple(int(x, 16) for x in r.split("-")) for r in args[i + 1].split(",")]
+        del args[i : i + 2]
     ttf, pt, name, out_path = args[0], int(args[1]), args[2], args[3]
 
     face = freetype.Face(ttf)
     face.set_char_size(pt << 6, 0, DPI, 0)
+    print("metrics: advanceY=%d ascender=%d" % ((face.size.height + 63) >> 6, (face.size.ascender + 63) >> 6))
 
     covered = []  # (cp, glyph) in codepoint order
     for lo, hi in RANGES:
