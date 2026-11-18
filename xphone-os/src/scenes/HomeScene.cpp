@@ -34,7 +34,8 @@ constexpr const char* kPrefsLayoutKey = "homeLay";   // 0 = Tiles, 1 = Widget
 constexpr const char* kPrefsTilesKey = "homeTiles";   // csv of builtin ids
 constexpr const char* kPrefsWidgetsKey = "homeWdgts"; // csv of builtin ids
 constexpr const char* kPrefsSlotsKey = "homeSlots";   // csv, launcher slots
-constexpr const char* kDefaultSlots = "today,notifications,priorities,block,read,workout";
+// flowe-lorcana: Today/Priorities/Block/Workout removed from the launcher.
+constexpr const char* kDefaultSlots = "notifications,read,lorcana";
 
 
 // Geometry (logical portrait; both panels). Same margins as the V2 mock,

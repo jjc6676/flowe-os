@@ -9,6 +9,7 @@
 #include "HomeScene.h"
 #include "WifiScene.h"
 #include "LauncherScene.h"
+#include "LorcanaScene.h"
 #include "NotificationsScene.h"
 #include "PrioritiesScene.h"
 #include "ReaderScene.h"
@@ -40,6 +41,7 @@ FileTransferScene gFileTransfer;
 WifiScene gWifi;
 AppScene gApp;
 HomeScene gHome;
+LorcanaScene gLorcana;
 }  // namespace
 
 void showLauncher() {
@@ -91,6 +93,11 @@ void showReader() {
 void showWorkout() {
   gCurrentSceneId = SceneId::Workout;
   SCENES.switchTo(gWorkout);
+}
+
+void showLorcana() {
+  gCurrentSceneId = SceneId::Lorcana;
+  SCENES.switchTo(gLorcana);
 }
 
 void showFileTransfer() {
@@ -158,6 +165,7 @@ void showSceneById(SceneId id) {
     case SceneId::Reader:        showReader();        break;
     case SceneId::Workout:       showWorkout();       break;
     case SceneId::Home:          showHome();          break;
+    case SceneId::Lorcana:       showLorcana();       break;
     // FileTransfer deliberately NOT restored: waking straight into a scene
     // that would show a stale Idle menu (the radio never survives sleep)
     // helps nobody — fall through to the launcher.
@@ -178,6 +186,7 @@ const char* sceneName(SceneId id) {
     case SceneId::Reader:        return "Reader";
     case SceneId::Workout:       return "Workout";
     case SceneId::Home:          return "Home";
+    case SceneId::Lorcana:       return "Lorcana";
     case SceneId::FileTransfer:  return "Transfer";
     case SceneId::Launcher:      return "Launcher";
     default:                     return "Launcher";

@@ -31,6 +31,7 @@
 #include "scenes/AppScenes.h"
 #include "scenes/PrioritiesScene.h"
 #include "scenes/WorkoutScene.h"
+#include "scenes/LorcanaScene.h"
 #include "WorkoutStore.h"
 #include <ArduinoJson.h>
 
@@ -117,18 +118,13 @@ void composeSleepScreen(Gfx& gfx, const bool napping) {
   // the Widget home; the Priorities hero falls through to the poster below,
   // which is that hero. Same footer and the same moon-and-state line as the
   // other faces, so every rest screen reads as one design.
-  if (Sleep::face() == Sleep::Face::LastScreen && gCurrentSceneId != SceneId::Workout &&
-      homeLayout() == HomeLayout::Widget && homeRenderDormant(gfx)) {
-    int slotY = gfx.height() - 108;
-    if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    PrioritiesScene::renderDormantFooter(gfx, slotY);
+  // flowe-lorcana: Priorities, Today, Block and Workout are gone, so the
+  // poster no longer draws their list, calendar line or block line. Sleeping
+  // from the Lorcana counter keeps the score on the glass; anything else
+  // gets the wordmark and the wake hint.
+  if (gCurrentSceneId == SceneId::Lorcana && LorcanaScene::renderDormant(gfx)) {
     PrioritiesScene::renderDormantWakeHint(gfx, napping);
-  } else if (gCurrentSceneId == SceneId::Workout && WorkoutScene::renderDormant(gfx)) {
-    int slotY = gfx.height() - 108;
-    if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    PrioritiesScene::renderDormantFooter(gfx, slotY);
-    PrioritiesScene::renderDormantWakeHint(gfx, napping);
-  } else if (!PrioritiesScene::renderDormant(gfx, napping)) {
+  } else {
     const int cx = gfx.width() / 2;
     const int wordmarkY = gfx.height() * 2 / 5;
     StatusBar::drawFloweStamp(gfx, cx, wordmarkY);
@@ -137,14 +133,6 @@ void composeSleepScreen(Gfx& gfx, const bool napping) {
     constexpr int kRuleW = 56;
     const int ruleY = wordmarkY + gfx.lineHeight(kFontBold) + 10;
     gfx.fillRect(cx - kRuleW / 2, ruleY, kRuleW, 2, true);
-
-    // M5 sleep redesign: centered footer stack — calendar line, block line,
-    // wake hint — the same chrome the priorities frame draws, so both sleep
-    // faces read as one design.
-    (void)ruleY;
-    int slotY = gfx.height() - 108;
-    if (PrioritiesScene::renderDormantBlockLine(gfx, slotY)) slotY = gfx.height() - 148;
-    PrioritiesScene::renderDormantFooter(gfx, slotY);
 
     PrioritiesScene::renderDormantWakeHint(gfx, napping);
   }

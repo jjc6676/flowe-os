@@ -79,9 +79,9 @@ void LauncherScene::loadSlots() {
   // Builtin id -> launcher icon index + label (LauncherIcons.h app order).
   struct Builtin { const char* id; const char* label; int8_t icon; };
   static constexpr Builtin kBuiltins[] = {
-      {"today", "Today", 0},        {"notifications", "Notifications", 1},
-      {"priorities", "Priorities", 2}, {"block", "Block", 3},
-      {"read", "Read", 4},          {"workout", "Workout", 5}};
+      // flowe-lorcana: Today, Priorities, Block and Workout are not offered.
+      // Lorcana has no bitmap in LauncherIcons, so it draws the monogram tile.
+      {"notifications", "Notifications", 1}, {"read", "Read", 4}, {"lorcana", "Lorcana", -1}};
   char csv[224];
   homeSlotsCsv(csv, sizeof(csv));
   // A saved layout that names an app the card no longer holds is stale, and
@@ -247,10 +247,7 @@ void LauncherScene::handleInput(Input& in) {
   // Deep Work block without opening the app. Checked before the tap handlers;
   // the Input state machine suppresses the tap-on-release once a long-press
   // fires, so Btn::Down won't also move the selection this press.
-  if (in.wasLongPressed(Btn::Down)) {
-    showBlockDeepWork();
-    return;
-  }
+  // flowe-lorcana: the Deep Work long-press is gone with the Block app.
   if (in.wasPressed(Btn::Left)) moveSelection(-1, 0);
   if (in.wasPressed(Btn::Right)) moveSelection(+1, 0);
   if (in.wasPressed(Btn::Up)) moveSelection(0, -1);
@@ -258,18 +255,12 @@ void LauncherScene::handleInput(Input& in) {
   if (in.wasPressed(Btn::Confirm)) {
     if (!_slotsLoaded) loadSlots();
     const char* id = _slots[_sel].id;
-    if (strcmp(id, "block") == 0) {
-      showBlock();
-    } else if (strcmp(id, "priorities") == 0) {
-      showPriorities();
-    } else if (strcmp(id, "today") == 0) {
-      showToday();
-    } else if (strcmp(id, "notifications") == 0) {
+    if (strcmp(id, "notifications") == 0) {
       showNotifications();
     } else if (strcmp(id, "read") == 0) {
       showReader();
-    } else if (strcmp(id, "workout") == 0) {
-      showWorkout();
+    } else if (strcmp(id, "lorcana") == 0) {
+      showLorcana();
     } else {
       if (!showApp(id)) markDirty();  // a missing app just repaints the grid
     }
