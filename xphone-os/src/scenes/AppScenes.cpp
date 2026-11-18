@@ -158,17 +158,20 @@ void showSceneById(SceneId id) {
     case SceneId::Notifications: showNotifications(); break;
     case SceneId::Settings:      showSettings();      break;
     case SceneId::Wifi:          showWifi();          break;
-    case SceneId::Block:         showBlock();         break;
-    case SceneId::Priorities:    showPriorities();    break;
-    case SceneId::Today:         showToday();         break;
     case SceneId::About:         showAbout();         break;
     case SceneId::Reader:        showReader();        break;
-    case SceneId::Workout:       showWorkout();       break;
     case SceneId::Home:          showHome();          break;
     case SceneId::Lorcana:       showLorcana();       break;
     // FileTransfer deliberately NOT restored: waking straight into a scene
     // that would show a stale Idle menu (the radio never survives sleep)
     // helps nobody — fall through to the launcher.
+    // flowe-lorcana: Block, Priorities, Today and Workout are no longer
+    // offered, so a restore id saved by the stock firmware must not reopen
+    // them — they land on the launcher too.
+    case SceneId::Block:
+    case SceneId::Priorities:
+    case SceneId::Today:
+    case SceneId::Workout:
     case SceneId::FileTransfer:
     case SceneId::Launcher:
     default:                     showLauncher();      break;

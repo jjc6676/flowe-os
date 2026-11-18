@@ -223,10 +223,12 @@ void LorcanaScene::render(Gfx& gfx) {
   drawInk(gfx, cx, inkTop + 4);
 
   // --- Hints (side buttons and holds are not discoverable otherwise) ---------
+  // Both lines are measured against the 10pt advance table (391 and 415 px
+  // of the 480); the longer wording this replaced ran 477 px, edge to edge.
   const int hintY = bottom + 6;
   gfx.drawTextCentered(kFontSmall, cx, hintY, "Side buttons: lore +/-   Hold INK: new turn");
   gfx.drawTextCentered(kFontSmall, cx, hintY + gfx.lineHeight(kFontSmall) + 2,
-                       "Hold UNDO: un-ink a card   Hold SPEND: new game");
+                       "Hold UNDO: un-ink   Hold SPEND: new game");
 }
 
 bool LorcanaScene::renderDormant(Gfx& gfx) {

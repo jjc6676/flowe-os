@@ -243,10 +243,6 @@ XpRect LauncherScene::cellRect(const int i) const {
 }
 
 void LauncherScene::handleInput(Input& in) {
-  // Quick action: long-press the top-RIGHT button (Btn::Down) to start a
-  // Deep Work block without opening the app. Checked before the tap handlers;
-  // the Input state machine suppresses the tap-on-release once a long-press
-  // fires, so Btn::Down won't also move the selection this press.
   // flowe-lorcana: the Deep Work long-press is gone with the Block app.
   if (in.wasPressed(Btn::Left)) moveSelection(-1, 0);
   if (in.wasPressed(Btn::Right)) moveSelection(+1, 0);

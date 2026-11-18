@@ -1044,7 +1044,8 @@ static const char* sceneName(uint8_t id) {
   static constexpr const char* kNames[] = {"launcher", "notifications", "settings",
                                            "block",    "priorities",    "today",
                                            "about",    "reader",        "workout",
-                                           "transfer"};
+                                           "transfer", "wifi",          "home",
+                                           "lorcana"};
   return id < sizeof(kNames) / sizeof(kNames[0]) ? kNames[id] : "?";
 }
 
@@ -1935,7 +1936,8 @@ static void pumpDevConsole() {
       // once started a real Block session from the bench).
       static constexpr const char* kSceneNames[] = {
           "launcher", "notifications", "settings",  "block",   "priorities",
-          "today",    "about",         "reader",    "workout", "transfer", "wifi", "home"};
+          "today",    "about",         "reader",    "workout", "transfer", "wifi", "home",
+          "lorcana"};
       const uint32_t id = static_cast<uint32_t>(gCurrentSceneId);
       char detail[96] = {0};
       if (gCurrentSceneId == SceneId::Reader) readerWhere(detail, sizeof(detail));
