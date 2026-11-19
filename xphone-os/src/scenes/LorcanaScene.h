@@ -4,8 +4,9 @@
 // device.
 //
 // Nothing here talks to the phone. Both numbers live in NVS ("lorcana"
-// namespace) and are written on every change, so a game survives sleep, a
-// power-off and a firmware update.
+// namespace) and are written on every change (one loop tick after the press,
+// so the number is drawn first), so a game survives sleep, a power-off and a
+// firmware update.
 //
 // Controls (X4: Up/Down are the two side buttons):
 //   side Up        = lore +1 (20 wins; it keeps counting past 20)
@@ -26,6 +27,7 @@
 class LorcanaScene : public Scene {
  public:
   void onEnter() override;
+  void onExit() override;
   void handleInput(Input& in) override;
   void render(Gfx& gfx) override;
   const char* const* softKeys() const override;
