@@ -66,7 +66,7 @@ void showPriorities();  // M3: real Priorities scene (to-do snapshot via BLE)
 void showToday();       // M3: real Today scene (agenda/reminders/weather card)
 void showReader();      // R1 EPUB reader (resumes the last book; book list on BACK)
 void showReaderShelf(); // custom build: the reader, opened on the book list (launcher Read)
-void showReaderSpeed(); // custom build: the reader, last book straight into Speed Read
+void showReaderSpeed(); // custom build: the book list; the book picked opens in Speed Read
 void showWorkout();     // Workout: set-by-set exercise tracker synced from iPhone
 void showLorcana();     // Lorcana: lore + ink counter (local only, kept in NVS)
 // Declarative app (Phase 1: bench dev console "app <name>"). Loads

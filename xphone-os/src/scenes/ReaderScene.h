@@ -51,9 +51,10 @@ class ReaderScene : public Scene {
   // custom build: the next onEnter shows the book list instead of resuming
   // the last book (the launcher's Read tile). Wake restore still resumes.
   void openShelfNext() { _shelfNext = true; }
-  // custom build: the next book that reaches its page starts in Speed Read
-  // (the launcher's Speed tile). Cleared on exit.
-  void openSpeedNext() { _spPending = true; }
+  // custom build: the launcher's Speed tile. Until the reader is left, every
+  // book picked from the shelf starts in Speed Read, so the tile reaches any
+  // book and not only the last one. Cleared on exit.
+  void openSpeedNext() { _spPending = _spSession = true; }
   // Bench dev console ("where" v2): sub-state + selection one-liner —
   // dead-reckoning from "scene=reader" alone opened a real book once.
   void debugWhere(char* out, size_t n) const;
@@ -243,6 +244,20 @@ class ReaderScene : public Scene {
   // blocking work runs — flush is idle and render() repaints after).
   uint8_t* _fbForLoan = nullptr;
   void suspendRadioForBookWork();
+  // custom build: the same radio pause WITHOUT claiming the cover decoder's
+  // scratch. A packaged book never decodes a cover while it is being read,
+  // and the 17.9 KB scratch took the largest free block the page buffer
+  // needed (measured on the X4, 2026-11-18).
+  void suspendRadioKeepHeap();
+  // custom build: open a packaged book without the "Opening book..." frame.
+  void armFbpOpenWithoutFrame();
+  // custom build: a page turn draws first; its place is written a tick later.
+  void flushFbpPos();
+  bool _fbpPosDue = false;
+  // custom build: a page being read must not flash on its own, so a book
+  // keeps the ghost scrub on the press (see Scene::scrubWhenIdle). The shelf
+  // is a menu like any other and takes its scrub in a pause.
+  bool scrubWhenIdle() const override { return _state == State::BookList; }
   void streamPos();
 
   int _spine = 0;
@@ -432,6 +447,7 @@ class ReaderScene : public Scene {
   static constexpr uint16_t kSpMaxWpm = 600;
   static constexpr uint32_t kSpMinFlashMs = 700;  // panel refresh + a beat to read
   bool _spPending = false;    // enter Speed Read once a page is up
+  bool _spSession = false;    // came in by the Speed tile: each book picked re-arms _spPending
   bool _spMode = false;
   bool _spPlaying = false;
   bool _spNeedWords = true;   // (re)load the current page's words at render
@@ -441,8 +457,16 @@ class ReaderScene : public Scene {
   uint16_t _spWpm = 300;
   uint16_t _spCount = 0;      // words on this page
   uint16_t _spIdx = 0;        // first word of the phrase on glass
-  uint16_t _spOff[kSpMaxWords];
-  char _spPool[kSpPool];
+  // The word store is one heap block (3,872 bytes) held only while Speed
+  // Read is on screen. As members these two arrays sat in the static Reader
+  // scene all the time, which cost every packaged book 3.9 KB of the heap it
+  // needs for its page buffer (measured 2026-11-18: 121,204 vs 117,268 bytes
+  // of static RAM with and without them).
+  uint16_t* _spOff = nullptr;  // kSpMaxWords offsets into _spPool
+  char* _spPool = nullptr;     // kSpPool bytes of NUL-terminated words
+  bool _spNoMem = false;       // the word store could not be allocated
+  bool speedEnsureWords();     // allocate the store; false when memory is short
+  void speedFreeWords();
   uint32_t _spNextMs = 0;
   void enterSpeed();
   void exitSpeed();

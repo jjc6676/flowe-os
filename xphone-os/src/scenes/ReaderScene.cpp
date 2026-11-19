@@ -287,6 +287,99 @@ bool readThumbDims(const char* binPath, uint16_t* w, uint16_t* h) {
   return true;
 }
 
+// custom build: what the directory walk already saw of the small files that
+// sit beside each book (.pos = reading place, .cov = cover thumb). Opening
+// one by name makes the card search the whole folder again (about 26 ms per
+// book on a 12-book shelf, measured 2026-11-18), so the walk reads them while
+// it has each file open and the shelf asks this table instead. The table
+// lives only for the length of one scanBooks().
+struct SideNote {
+  uint32_t hash;  // lower-cased full path of the sidecar
+  uint32_t a, b;  // .pos: page, count      .cov: width, height
+  uint8_t kind;   // kSidePos or kSideCov
+  uint8_t ok;     // .pos: the count trailer was there   .cov: header and size are sound
+};
+constexpr uint8_t kSidePos = 1;
+constexpr uint8_t kSideCov = 2;
+constexpr int kSideNoteMax = 64;  // two per book on a full 32-book window
+SideNote* sSideNotes = nullptr;
+int sSideNoteCount = 0;
+bool sSideNotesWhole = false;  // false: the walk missed a file, so a miss proves nothing
+
+uint32_t sidePathHash(const char* s) {  // FNV-1a, ASCII case folded like the card's own lookup
+  uint32_t h = 2166136261u;
+  for (; *s; s++) {
+    uint8_t c = static_cast<uint8_t>(*s);
+    if (c >= 'A' && c <= 'Z') c = static_cast<uint8_t>(c + 32);
+    h = (h ^ c) * 16777619u;
+  }
+  return h;
+}
+
+// Called by the walk for every plain file, while `f` is still open.
+void noteSidecar(const char* dir, const bool isRoot, const char* name, const int len, FsFile& f) {
+  if (!sSideNotes || len <= 4) return;
+  uint8_t kind = 0;
+  if (strcasecmp(name + len - 4, ".pos") == 0) kind = kSidePos;
+  else if (strcasecmp(name + len - 4, ".cov") == 0) kind = kSideCov;
+  if (!kind) return;
+  char full[168];
+  const int n = snprintf(full, sizeof(full), "%s/%s", isRoot ? "" : dir, name);
+  if (sSideNoteCount >= kSideNoteMax || n <= 0 || n >= static_cast<int>(sizeof(full))) {
+    sSideNotesWhole = false;
+    return;
+  }
+  SideNote& s = sSideNotes[sSideNoteCount++];
+  s = SideNote{};
+  s.hash = sidePathHash(full);
+  s.kind = kind;
+  if (kind == kSidePos) {
+    uint32_t page = 0, count = 0;
+    f.read(&page, 4);
+    s.ok = f.read(&count, 4) == 4 ? 1 : 0;
+    s.a = page;
+    s.b = count;
+  } else {  // the same test readThumbDims makes
+    uint8_t hdr[8];
+    if (f.read(hdr, sizeof(hdr)) == static_cast<int>(sizeof(hdr)) && hdr[0] == 0x54 && hdr[1] == 0x58 &&
+        hdr[2] == 1) {
+      const uint16_t tw = static_cast<uint16_t>(hdr[4] | (hdr[5] << 8));
+      const uint16_t th = static_cast<uint16_t>(hdr[6] | (hdr[7] << 8));
+      if (tw != 0 && th != 0 &&
+          static_cast<uint32_t>(f.fileSize()) >= 8 + ((static_cast<uint32_t>(tw) + 7) / 8) * th) {
+        s.a = tw;
+        s.b = th;
+        s.ok = 1;
+      }
+    }
+  }
+}
+
+// 1 = the walk read it (*out set), 0 = the walk saw every file and it is not
+// there, -1 = not known: open the file the old way.
+int findSideNote(const char* path, const uint8_t kind, const SideNote** out) {
+  if (!sSideNotes) return -1;
+  const uint32_t h = sidePathHash(path);
+  for (int i = 0; i < sSideNoteCount; i++) {
+    if (sSideNotes[i].hash == h && sSideNotes[i].kind == kind) {
+      *out = &sSideNotes[i];
+      return 1;
+    }
+  }
+  return sSideNotesWhole ? 0 : -1;
+}
+
+// A cover's size from the walk when it has it, from the file when it does not.
+bool shelfCoverDims(const char* covPath, uint16_t* w, uint16_t* h) {
+  const SideNote* note = nullptr;
+  const int known = findSideNote(covPath, kSideCov, &note);
+  if (known < 0) return readThumbDims(covPath, w, h);
+  if (known == 0 || !note->ok) return false;
+  *w = static_cast<uint16_t>(note->a);
+  *h = static_cast<uint16_t>(note->b);
+  return true;
+}
+
 // F6 (2026-08-19): publish a raw EPUB's cover thumb beside the book as
 // <path>.cov, the same place and format a compiled package's lands in.
 //
@@ -382,6 +475,8 @@ void ReaderScene::onEnter() {
       _quietReopen = false;
       _workArmed = true;
       clearDirty();  // switchTo marked us dirty; an "Opening book..." frame would replace the page
+    } else if (endsWithFbpCI(_bookPath.c_str())) {
+      armFbpOpenWithoutFrame();
     } else {
       markDirty();
     }
@@ -432,10 +527,81 @@ void ReaderScene::suspendRadioForBookWork() {
   reader::CoverThumb::preacquireScratch();
 }
 
+void ReaderScene::suspendRadioKeepHeap() {
+  if (_radioSuspended) return;
+  _radioSuspended = true;
+  COMPANION_BLE.suspendForReader();
+}
+
+namespace {
+// custom build: the packaged books whose page buffer did not fit beside the
+// radio. Opening one goes straight to the quiet heap; the radio is not
+// started only to be stopped a moment later. That costs more than the 0.4 s
+// it takes: the heap the radio hands back is in pieces (largest 19,444 B of
+// 88,704 B free on the shelf, X4 2026-11-18), and whatever the open placed
+// beside the radio splits the biggest piece.
+// Kept in NVS, newest first, because waking from sleep is a restart and is
+// the usual way into a book. Word 0 names the firmware build: what fits
+// beside the radio depends on the build, so a new build learns the list
+// again, one slower open per book.
+constexpr size_t kQuietFbpMax = 16;
+constexpr const char* kPrefsQuietKey = "fbpQuiet";
+// The one book last restarted to get its chosen text size (see renderFbp).
+constexpr const char* kPrefsSizeBootKey = "fbpSzBoot";
+uint32_t sQuietFbp[1 + kQuietFbpMax];  // [0] = build, then book path hashes
+uint8_t sQuietFbpCount = 0;
+bool sQuietFbpLoaded = false;
+
+uint32_t pathHash(const char* s) {
+  uint32_t h = 2166136261u;  // FNV-1a
+  for (; *s; s++) h = (h ^ static_cast<uint8_t>(*s)) * 16777619u;
+  return h ? h : 1;
+}
+
+void loadQuietFbp() {
+  if (sQuietFbpLoaded) return;
+  sQuietFbpLoaded = true;
+  sQuietFbp[0] = pathHash(XPHONE_GIT_REV_STR);
+  uint32_t saved[1 + kQuietFbpMax];
+  size_t got = 0;
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, /*readOnly=*/true)) {
+    if (prefs.isKey(kPrefsQuietKey)) got = prefs.getBytes(kPrefsQuietKey, saved, sizeof(saved));
+    prefs.end();
+  }
+  if (got < 2 * sizeof(uint32_t) || got % sizeof(uint32_t) || saved[0] != sQuietFbp[0]) return;
+  sQuietFbpCount = static_cast<uint8_t>(got / sizeof(uint32_t) - 1);
+  memcpy(sQuietFbp + 1, saved + 1, sQuietFbpCount * sizeof(uint32_t));
+}
+
+bool isQuietFbp(const uint32_t h) {
+  loadQuietFbp();
+  for (uint8_t i = 0; i < sQuietFbpCount; i++) {
+    if (sQuietFbp[1 + i] == h) return true;
+  }
+  return false;
+}
+
+void rememberQuietFbp(const uint32_t h) {
+  if (isQuietFbp(h)) return;
+  if (sQuietFbpCount < kQuietFbpMax) sQuietFbpCount++;  // full: the oldest falls off the end
+  memmove(sQuietFbp + 2, sQuietFbp + 1, (sQuietFbpCount - 1) * sizeof(uint32_t));
+  sQuietFbp[1] = h;
+  Preferences prefs;
+  if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+    prefs.putBytes(kPrefsQuietKey, sQuietFbp, (1 + sQuietFbpCount) * sizeof(uint32_t));
+    prefs.end();
+  }
+}
+}  // namespace
+
 void ReaderScene::onExit() {
+  flushFbpPos();    // custom build: no page turn may leave the scene unwritten
   _spMode = false;  // custom build: Speed Read never survives leaving the reader
   _spPlaying = false;
   _spPending = false;
+  _spSession = false;
+  speedFreeWords();
   _fbForLoan = nullptr;  // no framebuffer borrow may survive this scene
   // Capture the pagination BEFORE the book state is torn down below, for the
   // place we hand the phone at the end (item 6 step 3).
@@ -680,7 +846,14 @@ void ReaderScene::workOpenBook() {
       const BatteryMonitor::Status batt = battery.readStatus();
       if (batt.supported && batt.percentageKnown) pct = batt.percentage;
     }
-    if (RadioPolicy::radioAllowed(pct)) {
+    if (isQuietFbp(pathHash(_bookPath.c_str()))) {
+      // custom build: this book's page buffer did not fit beside the radio
+      // when it was last tried. Starting the radio only to stop it again at
+      // the first page cost about 0.4 s per open (X4, 2026-11-18) and left
+      // the heap in smaller pieces than the chosen text size needs.
+      Serial.println("[xphone-os] reader: radio off for this book (it did not fit beside the radio last time)");
+      suspendRadioKeepHeap();
+    } else if (RadioPolicy::radioAllowed(pct)) {
       // Bring the stack up NOW, into the cleanest heap — BEFORE the book's
       // state exists, never beside it (BLE init beside ~60 KB of resident
       // book state hard-hung an X4, see the M4.2 note in main.cpp).
@@ -698,7 +871,9 @@ void ReaderScene::workOpenBook() {
       // returns on book close exactly as it does for EPUBs today.
       Serial.printf("[xphone-os] reader: radio off for this book (policy=%u batt=%d%%)\n",
                     static_cast<unsigned>(RadioPolicy::get()), pct);
-      suspendRadioForBookWork();
+      // custom build: without the cover scratch, which a package never uses
+      // while it is read and which can take the block the page buffer needs.
+      suspendRadioKeepHeap();
     }
     workOpenFbp();
     return;
@@ -792,9 +967,24 @@ void ReaderScene::fbpTurn(const bool forward) {
   }
   reader::ReadingStats::pageTurn();
   if (_fbp) _lastPageCount = (uint16_t)_fbp->pageCount();
-  reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _lastPageCount);
+  // custom build: the place is written one loop tick later (flushFbpPos, from
+  // handleInput), behind the page that is about to be drawn. The write took
+  // 41 ms between the press and the page (measured 2026-11-18).
+  _fbpPosDue = true;
   streamPos();
   markDirty();
+}
+
+// custom build: write the place a page turn left behind. Runs at the top of
+// every handleInput tick and before anything that closes or swaps the book.
+void ReaderScene::flushFbpPos() {
+  if (!_fbpPosDue) return;
+  _fbpPosDue = false;
+  if (_bookPath.empty()) return;
+  const uint32_t tSave = millis();
+  reader::FbpBook::savePos(_bookPath.c_str(), _fbpPage, _lastPageCount);
+  Serial.printf("[xphone-os] fbp: place saved in %lu ms (behind the page)\n",
+                static_cast<unsigned long>(millis() - tSave));
 }
 
 // --- A3 finished-book offer ----------------------------------------------------
@@ -934,6 +1124,7 @@ void ReaderScene::openEndOfferBook() {
   // two page buffers + two glyph caches at once and the second open dies
   // with "no room for a page buffer" (caught by X1's cross-book jump with
   // two big books, 2026-09-02).
+  flushFbpPos();  // custom build: the old book's place, before its path is replaced
   _section.reset();
   _epub.reset();
   _measure.reset();
@@ -956,6 +1147,18 @@ void ReaderScene::openEndOfferBook() {
   _work = Work::OpenBook;
   _workArmed = false;
   markDirty();
+  if (endsWithFbpCI(_bookPath.c_str())) armFbpOpenWithoutFrame();
+}
+
+// custom build: a packaged book opens in about 45 ms, and the "Opening
+// book..." frame in front of it cost a whole 594 ms screen refresh (both
+// measured on the X4, 2026-11-18). Arm the open directly, the way the sync
+// reopen does, and leave the last picture on the glass until the first page
+// replaces it. EPUBs keep the frame: their first open can take seconds.
+// A failed open still paints its own error frame (failWith marks dirty).
+void ReaderScene::armFbpOpenWithoutFrame() {
+  _workArmed = true;
+  clearDirty();
 }
 
 // X1 reader.goto: the phone asks for a paragraph. Scene rules (v1, in the
@@ -2173,7 +2376,64 @@ void ReaderScene::renderFbp(Gfx& gfx) {
     }
     // contentRight, not width(): in landscape the soft-key column eats the
     // right edge and the compiled landscape profiles are that much narrower.
-    if (!_fbp->selectProfile((uint16_t)contentRight(gfx, 0), (uint16_t)gfx.height(), preferPx)) {
+    const uint16_t profW = (uint16_t)contentRight(gfx, 0);
+    const uint16_t profH = (uint16_t)gfx.height();
+    bool profileOk = _fbp->selectProfile(profW, profH, preferPx);
+    // custom build: selectProfile falls back to any size whose page buffer
+    // fits, so "opened" is not yet "opened at the chosen size". The chosen
+    // size is picked as it picks: nearest the preference, first wins, and
+    // the middle size when no preference was ever saved.
+    auto chosenRank = [&]() {
+      int want = _fbp->sizeCount() / 2;
+      int best = 1 << 20;
+      for (int i = 0; preferPx && i < _fbp->sizeCount(); i++) {
+        const int px = _fbp->pxSizeAt(i);
+        const int d = px > preferPx ? px - preferPx : preferPx - px;
+        if (d < best) {
+          best = d;
+          want = i;
+        }
+      }
+      return want;
+    };
+    auto atChosenSize = [&]() { return _fbp->sizeIndex() == chosenRank(); };
+    bool sizeOk = profileOk && atChosenSize();
+    if (!_radioSuspended && (profileOk ? !sizeOk : _fbp->lastFailNoMemory())) {
+      // custom build: the page buffer does not fit beside the radio (or only
+      // a smaller size's does). Measured on the X4 2026-11-18 (fw-v0.7.5):
+      // with BLE up the heap had 17-18 KB free and 8.7-10.2 KB in one piece,
+      // and the packaged books on the card needed 11.0-13.9 KB.
+      // Give this book the radio's heap instead, exactly as the "radio off"
+      // policy and every EPUB do; onExit brings the radio back. The quiet
+      // restart below stays as the last resort.
+      Serial.printf("[xphone-os] reader: no room for a page buffer beside the radio (free=%u largest=%u); "
+                    "radio off for this book\n",
+                    ESP.getFreeHeap(),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+      rememberQuietFbp(pathHash(_bookPath.c_str()));  // next time: no radio start at all
+      // Start over with a fresh book object. The one opened beside the radio
+      // sits in the middle of the heap the radio is about to hand back; kept,
+      // it left 12,276 B in one piece where the 26px page buffer of one book
+      // needed 12,285 B, and that book came up at 30px instead (X4,
+      // 2026-11-18). Nothing has been drawn from it yet.
+      _fbp.reset();
+      suspendRadioKeepHeap();  // not the cover scratch: it took the block this buffer needs
+      auto* fb = new (std::nothrow) reader::FbpBook();
+      if (!fb || !fb->open(_bookPath.c_str())) {
+        delete fb;
+        failWith("Couldn't open this book");
+        renderMessage(gfx, "Read", "Couldn't open this book");
+        return;
+      }
+      _fbp.reset(fb);
+      profileOk = _fbp->selectProfile(profW, profH, preferPx);
+      sizeOk = profileOk && atChosenSize();
+      Serial.printf("[xphone-os] reader: retry without the radio %s (free=%u largest=%u)\n",
+                    profileOk ? "opened the book" : "failed",
+                    ESP.getFreeHeap(),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    }
+    if (!profileOk) {
       if (!_fbp->lastFailNoMemory()) {
         renderMessage(gfx, "Read", "Package profile mismatch");
         return;
@@ -2206,10 +2466,48 @@ void ReaderScene::renderFbp(Gfx& gfx) {
       _oomRestartPending = true;
       return;
     }
+    if (!sizeOk) {
+      // custom build: the book opened without the radio, but only at another
+      // text size. Opens that start the radio beside a book and stop it
+      // again leave small blocks in the heap it hands back: on the X4
+      // (2026-11-18), after ten such opens in one power-on, two books
+      // (12,285 B and 12,440 B page buffers) came up at 30px with 93 KB
+      // free; thirty opens that never started the radio all kept 26px.
+      // The same quiet restart gives the chosen size: the book is on the
+      // quiet list by now, so the radio is never started beside it.
+      // Once per book: if the size does not fit a clean heap either, the
+      // book reads at the size that did, and is not restarted for it again.
+      const uint32_t bookHash = pathHash(_bookPath.c_str());
+      bool restartedAlready = false;
+      {
+        Preferences prefs;
+        if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
+          restartedAlready = prefs.isKey(kPrefsSizeBootKey) && prefs.getUInt(kPrefsSizeBootKey, 0) == bookHash;
+          if (!restartedAlready) prefs.putUInt(kPrefsSizeBootKey, bookHash);
+          prefs.end();
+        }
+      }
+      Serial.printf("[xphone-os] reader: the chosen %upx did not fit, opened at %upx (free=%u largest=%u)%s\n",
+                    static_cast<unsigned>(_fbp->pxSizeAt(chosenRank())), static_cast<unsigned>(_fbp->pxSize()),
+                    ESP.getFreeHeap(),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+                    restartedAlready ? "; already restarted once, keeping this size" : "; restarting quietly");
+      if (!restartedAlready) {
+        rememberQuietFbp(bookHash);
+        renderMessage(gfx, "Read", "Freeing memory...");
+        _oomRestartPending = true;
+        return;
+      }
+    }
     {
       Preferences prefs;  // the book opened: a later shortage may restart again
       if (prefs.begin(kPrefsNamespace, /*readOnly=*/false)) {
         if (prefs.isKey("oomBoot")) prefs.remove("oomBoot");
+        // custom build: and at its chosen size, so a later miss may restart for it again
+        if (sizeOk && prefs.isKey(kPrefsSizeBootKey) &&
+            prefs.getUInt(kPrefsSizeBootKey, 0) == pathHash(_bookPath.c_str())) {
+          prefs.remove(kPrefsSizeBootKey);
+        }
         prefs.end();
       }
     }
@@ -2511,6 +2809,7 @@ void ReaderScene::maybeArmPrefetch() {
 // --- Input ----------------------------------------------------------------------
 
 void ReaderScene::handleInput(Input& in) {
+  flushFbpPos();  // custom build: the place the last page turn left to write
   if (_oomRestartPending && !SCENES.flushInFlight()) {
     _oomRestartPending = false;
     quietRestartToScene(static_cast<uint32_t>(SceneId::Reader));  // does not return
@@ -2825,8 +3124,10 @@ bool ReaderScene::shelfQuietBuildPending() const {
 }
 
 void ReaderScene::enterBookList() {
+  flushFbpPos();    // custom build: write the place before the book is let go
   _spMode = false;  // custom build: the shelf is never a speed-read screen
   _spPlaying = false;
+  speedFreeWords();
   const uint32_t tEnter = millis();
   reader::ReadingStats::sessionEnd();  // flush before the grid repaints (band shows fresh numbers)
   COMPANION_BLE.clearReaderPos();  // F1: the stream ends with the BOOK, not the scene —
@@ -2859,7 +3160,13 @@ void ReaderScene::enterBookList() {
   if (_sel < 0) _sel = 0;
   _lastTurnMs = 0;     // pace gaps don't span books (the EMA itself persists)
   const uint32_t tTornDown = millis();
-  scanBooks();
+  {
+    // custom build: the scan is about fifty small card lookups, and matching
+    // long file names is CPU work. Hold 160 MHz for it like the other reader
+    // work units do.
+    CpuBoost boost;
+    scanBooks();
+  }
   const uint32_t tScanned = millis();
   // R5: the shelf pauses the radio only when it has real work to do. The
   // scan and the package fast-pass just ran radio-up (proven safe); only a
@@ -2952,7 +3259,7 @@ bool ReaderScene::loadShelfIndex() {
         // sidecar. A missing or short cover must reach the repair pass.
         char cov[sizeof(e.path) + 8];
         snprintf(cov, sizeof(cov), "%s.cov", e.path);
-        if (readThumbDims(cov, &e.thumbW, &e.thumbH)) e.meta = TileMeta::Cover;
+        if (shelfCoverDims(cov, &e.thumbW, &e.thumbH)) e.meta = TileMeta::Cover;
       }
       if (e.title[0] == 0) prettyFileTitle(e.path, e.title, sizeof(e.title));
       filled++;
@@ -3067,11 +3374,27 @@ void ReaderScene::scanBooks(const int windowOffset) {
     _sel = 0;
     _scroll = 0;
   }
+  const uint32_t tScan0 = millis();  // custom build: name the scan's four parts
+  // custom build: the walk fills this; it is gone again when the scan returns.
+  struct SideNoteScope {
+    SideNoteScope() {
+      sSideNotes = new (std::nothrow) SideNote[kSideNoteMax];
+      sSideNoteCount = 0;
+      sSideNotesWhole = sSideNotes != nullptr;
+    }
+    ~SideNoteScope() {
+      delete[] sSideNotes;
+      sSideNotes = nullptr;
+      sSideNoteCount = 0;
+      sSideNotesWhole = false;
+    }
+  } sideNoteScope;
   _sdOk = SdMan.ready() || SdMan.begin();
   if (_sdOk) {
     scanDir("/books", 0);
     scanDir("/", 1);  // root: books allowed, no recursion into root dirs
   }
+  const uint32_t tScanWalk = millis();
   if (_skippedNames)
     Serial.printf("[xphone-os] reader: scan %d books, %u skipped (see lines above)\n", _totalBooks,
                   static_cast<unsigned>(_skippedNames));
@@ -3091,18 +3414,29 @@ void ReaderScene::scanBooks(const int windowOffset) {
     }
     char side[192];
     snprintf(side, sizeof(side), "%s.pos", b.path);
-    FsFile pf = SdMan.open(side, O_RDONLY);
-    if (pf) {
-      uint32_t page = 0, count = 0;
-      pf.read(&page, 4);
-      const bool hasCount = pf.read(&count, 4) == 4;
-      pf.close();
-      if (hasCount && count > 0 && page < count) {
-        uint32_t pct = (uint32_t)(((uint64_t)(page + 1) * 100) / count);
-        if (pct > 100) pct = 100;
-        if (pct == 0) pct = 1;
-        b.progressPct = (uint8_t)pct;
+    // custom build: the walk above already read every .pos it passed; only a
+    // place it could not vouch for is opened by name.
+    uint32_t page = 0, count = 0;
+    bool hasCount = false;
+    const SideNote* note = nullptr;
+    const int known = findSideNote(side, kSidePos, &note);
+    if (known == 1) {
+      page = note->a;
+      count = note->b;
+      hasCount = note->ok != 0;
+    } else if (known < 0) {
+      FsFile pf = SdMan.open(side, O_RDONLY);
+      if (pf) {
+        pf.read(&page, 4);
+        hasCount = pf.read(&count, 4) == 4;
+        pf.close();
       }
+    }
+    if (hasCount && count > 0 && page < count) {
+      uint32_t pct = (uint32_t)(((uint64_t)(page + 1) * 100) / count);
+      if (pct > 100) pct = 100;
+      if (pct == 0) pct = 1;
+      b.progressPct = (uint8_t)pct;
     }
   }
 
@@ -3153,7 +3487,9 @@ void ReaderScene::scanBooks(const int windowOffset) {
 
   // Fill from the shelf index first, so the fast-pass below only opens the
   // books the index does not already know.
+  const uint32_t tScanState = millis();
   loadShelfIndex();
+  const uint32_t tScanIndex = millis();
   int changedPackages = 0;
 
   // Fast-pass: tiles whose caches already exist paint complete on the FIRST
@@ -3244,6 +3580,11 @@ void ReaderScene::scanBooks(const int windowOffset) {
   }
   // Persist newly read metadata and repaired covers, not unchanged retries.
   if (changedPackages > 0) saveShelfIndex();
+  Serial.printf("[xphone-os] reader: scan parts walk=%lums state=%lums index=%lums tiles=%lums\n",
+                static_cast<unsigned long>(tScanWalk - tScan0),
+                static_cast<unsigned long>(tScanState - tScanWalk),
+                static_cast<unsigned long>(tScanIndex - tScanState),
+                static_cast<unsigned long>(millis() - tScanIndex));
 }
 
 void ReaderScene::scanDir(const char* dir, const int depth) {
@@ -3264,6 +3605,7 @@ void ReaderScene::scanDir(const char* dir, const int depth) {
       // SdFat returns 0 when the LFN doesn't fit the buffer AT ALL — this is
       // the silent path that ate the 135-char bench file. Count it.
       _skippedNames++;
+      sSideNotesWhole = false;  // custom build: it may have been a sidecar
       Serial.printf("[xphone-os] reader: SKIP (name unreadable or > %u chars) in %s\n",
                     static_cast<unsigned>(sizeof(name) - 1), dir);
       f.close();
@@ -3278,6 +3620,7 @@ void ReaderScene::scanDir(const char* dir, const int depth) {
       // so the empty state / serial can say WHY a book is missing instead of
       // silently losing it (the PocketFullOfFun failure mode).
       _skippedNames++;
+      sSideNotesWhole = false;  // custom build: it may have been a sidecar
       Serial.printf("[xphone-os] reader: SKIP (name > %u chars) %.60s...\n",
                     static_cast<unsigned>(sizeof(name) - 1), name);
       f.close();
@@ -3299,6 +3642,7 @@ void ReaderScene::scanDir(const char* dir, const int depth) {
     // Free while the handle is still open: the shelf index is keyed on
     // (name, size), so a book that was replaced is opened again.
     const uint32_t entrySize = static_cast<uint32_t>(f.fileSize());
+    noteSidecar(dir, isRoot, name, len, f);  // custom build: read a .pos/.cov while it is open
     f.close();
     if (!endsWithEpubCI(name) && !endsWithFbpCI(name)) continue;
 
@@ -3357,6 +3701,8 @@ void ReaderScene::openSelectedBook() {
 
   // Full reopen (even for the currently open book — progress.bin preserves
   // the position, and the path is one code path).
+  flushFbpPos();  // custom build: nothing unwritten may follow the path change
+  if (_spSession) _spPending = true;  // custom build: the Speed tile's shelf opens books in Speed Read
   _section.reset();
   _epub.reset();
   _measure.reset();
@@ -3377,6 +3723,7 @@ void ReaderScene::openSelectedBook() {
   _work = Work::OpenBook;  // replaces any pending GridMeta — opens never wait on thumbs
   _workArmed = false;
   markDirty();
+  if (endsWithFbpCI(_bookPath.c_str())) armFbpOpenWithoutFrame();
 }
 
 bool ReaderScene::hasRealToc() const {
@@ -4922,7 +5269,9 @@ void ReaderScene::renderBookList(Gfx& gfx) {
   char line[64];
   // Just "Reader": the right-hand range already ends in the same total, and
   // "Reader (8)   1-4 of 8" said eight twice on one line.
-  gfx.drawText(kFontBold, kListMarginX, 8, _doneView ? "Done" : "Read");
+  // custom build: the Speed tile's shelf says so, because OK on a book there
+  // starts Speed Read instead of the page.
+  gfx.drawText(kFontBold, kListMarginX, 8, _doneView ? "Done" : _spSession ? "Speed Read" : "Read");
   if (_totalBooks > perPage) {
     snprintf(line, sizeof(line), "%d-%d of %d", _scroll + 1,
              (_scroll + perPage < _totalBooks) ? _scroll + perPage : _totalBooks, _totalBooks);

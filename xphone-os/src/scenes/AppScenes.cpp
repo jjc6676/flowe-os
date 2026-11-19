@@ -92,6 +92,7 @@ void showReader() {
 
 void showReaderSpeed() {
   gReader.openSpeedNext();
+  gReader.openShelfNext();  // any book, not only the last one: pick it from the shelf
   showReader();
 }
 

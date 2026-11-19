@@ -45,6 +45,10 @@ class FbpBook {
   // How many sizes this geometry offers. 1 usually means a foreign package
   // (built for another panel) opened through the fallback in selectProfile.
   int sizeCount() const { return _nGeo; }
+  // custom build: the px of size `rank` (0 = smallest), 0 when out of range.
+  // Lets the reader tell "opened at the chosen size" from "opened at the only
+  // size whose page buffer fitted" after selectProfile's fallback.
+  uint16_t pxSizeAt(int rank) const { return rank >= 0 && rank < _nGeo ? _geo[rank].px_size : 0; }
   // Rank of the size in use, 0 = smallest. bookc writes each geometry's
   // profiles in ascending px order, so the array index IS the rank — the
   // size strip highlights by rank, never by absolute px (packages come in
@@ -155,6 +159,10 @@ class FbpBook {
     uint8_t textLen;
   };
   bool hasWordBoxes() const { return _wordTail != nullptr; }
+  // custom build: whether the BOOK was packaged with word boxes at all. A
+  // cover or full-page picture has none even in a book that carries them, so
+  // hasWordBoxes() alone cannot tell "this page" from "this book".
+  bool carriesWordBoxes() const { return _hdr.fmt_ver >= 8; }
   // The page those boxes belong to (the last one drawn), so a caller that
   // has already moved _fbpPage does not read another page's marks.
   uint16_t wordBoxesPage() const { return _wordTailPage; }
