@@ -13,6 +13,8 @@
 #endif
 
 #include "../StallWatch.h"
+#include "../CpuBoost.h"
+#include <new>
 #if defined(FLOWE_BENCH_TRANSFER_FLUSH_BARRIER)
 #include "../Scene.h"
 #endif
@@ -262,6 +264,11 @@ bool FileTransferServer::targetReaderOk() {
   return target == readerId;
 }
 
+// custom build: a transfer session runs the core at 160 MHz from server start
+// to server stop. The Wi-Fi radio is what a session costs the battery; the
+// faster core only ends it sooner. Measured on the X4, 2026-11-18.
+static CpuBoost* gTransferBoost = nullptr;
+
 bool FileTransferServer::begin() {
   _verifiedContact = false;
   _upload.bufferCapacity = UploadState::kBufferSize;
@@ -452,6 +459,7 @@ bool FileTransferServer::begin() {
   });
   _server->begin();
   _running = true;
+  if (!gTransferBoost) gTransferBoost = new (std::nothrow) CpuBoost();
   _stopRequested = false;
   _ownerTransferAborted = false;
   _bytesUploaded = 0;
@@ -506,6 +514,8 @@ void FileTransferServer::stop() {
     _server.reset();
   }
   _running = false;
+  delete gTransferBoost;  // custom build: back to the parked clock
+  gTransferBoost = nullptr;
   transferMemoryStop();
 }
 
@@ -1942,6 +1952,13 @@ void FileTransferServer::handleManifest() {
 
   bool first = true;
   char rel[192];
+  // custom build: hash each book's first 64 KB in 8 KB reads when the heap
+  // has the room (an eighth of the card commands). Same bytes, same MD5.
+  constexpr size_t kHashChunk = 8192;
+  struct HashScratch {
+    uint8_t* p = static_cast<uint8_t*>(malloc(kHashChunk));
+    ~HashScratch() { free(p); }
+  } hashScratch;
   const auto emitDir = [&](const char* dir, const char* prefix) -> bool {
     FsFile d = SdMan.open(dir, O_RDONLY);
     if (!d || !d.isDir()) return true;
@@ -1962,10 +1979,12 @@ void FileTransferServer::handleManifest() {
       // First-64KB MD5 through the already-open handle.
       MD5Builder md5;
       md5.begin();
-      uint8_t buf[1024];
+      uint8_t small[1024];
+      uint8_t* const buf = hashScratch.p ? hashScratch.p : small;
+      const uint32_t cap = hashScratch.p ? kHashChunk : sizeof(small);
       uint32_t left = 65536;
       while (left > 0) {
-        const int n = f.read(buf, left < sizeof(buf) ? left : sizeof(buf));
+        const int n = f.read(buf, left < cap ? left : cap);
         if (n <= 0) break;
         md5.add(buf, static_cast<uint16_t>(n));
         left -= static_cast<uint32_t>(n);
