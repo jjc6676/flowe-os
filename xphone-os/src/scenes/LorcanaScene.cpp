@@ -35,12 +35,19 @@ void loadGame() {
   if (g.ink > LorcanaScene::kMax) g.ink = LorcanaScene::kMax;
 }
 
+// A counter press draws first and saves a moment later (see handleInput), so
+// the flash write is not between the button and the number.
+bool gSaveDue = false;
+
 void saveGame() {
+  gSaveDue = false;
+  const uint32_t t0 = millis();
   Preferences p;
   if (!p.begin(kPrefsNs, false)) return;
   p.putUChar("lore", g.lore);
   p.putUChar("ink", g.ink);
   p.end();
+  Serial.printf("[xphone-os] lorcana: saved in %lu ms\n", static_cast<unsigned long>(millis() - t0));
 }
 
 // Label, big number, and under lore either "N to win" or an inverted
@@ -77,7 +84,14 @@ void LorcanaScene::onEnter() {
   markDirty();
 }
 
+void LorcanaScene::onExit() {
+  if (gSaveDue) saveGame();  // long-press BACK leaves without a handleInput tick
+}
+
 void LorcanaScene::handleInput(Input& in) {
+  // The save a counter press left behind: it runs on the tick after the
+  // press, when the new number is already on its way to the glass.
+  if (gSaveDue) saveGame();
   if (in.wasPressed(Btn::Back)) {
     showLauncher();
     return;
@@ -118,7 +132,7 @@ void LorcanaScene::handleInput(Input& in) {
   }
   if (!loreChanged && !inkChanged) return;
 
-  saveGame();
+  gSaveDue = true;  // written on the next tick, behind the repaint
   if (loreChanged) markDirty(loreRect());
   if (inkChanged) markDirty(inkRect());
   if (_confirmHint) {  // any other press clears the "hold" reminder
@@ -183,6 +197,7 @@ void LorcanaScene::render(Gfx& gfx) {
 
 bool LorcanaScene::renderDormant(Gfx& gfx) {
   loadGame();
+  if (gSaveDue) saveGame();  // going to sleep: nothing may be left unwritten
   const int w = gfx.width();
   const int cx = w / 2;
   int y = 52;

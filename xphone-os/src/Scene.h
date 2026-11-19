@@ -84,6 +84,12 @@ class Scene {
   // Sync in place: a scene that runs behind the previous picture says so,
   // and the manager drops its dirty flag instead of composing a frame.
   virtual bool suppressRepaint() const { return false; }
+  // custom build: may the periodic ghost scrub wait for a pause instead of
+  // landing on a press? On the X4 the scrub is a 1.9 s HALF against a 0.6 s
+  // FAST, so every 10th press used to take three times as long (measured
+  // 2026-11-18). A scene whose picture is being read while nothing is
+  // pressed (a book page) says no and keeps the scrub on the press.
+  virtual bool scrubWhenIdle() const { return true; }
 
   bool isDirty() const { return _dirty; }
   // Full-panel dirty (unknown/most of the screen changed).
@@ -135,6 +141,12 @@ extern RefreshStats gRefreshStats;
 // differential (FAST/PARTIAL) refreshes. Evidence in Scene.cpp's policy
 // comment; surfaced here so About can show it next to the rolling count.
 constexpr uint8_t kScrubAfterRefreshes = 10;
+// custom build: once the scrub is due, a scene that allows it (scrubWhenIdle)
+// gets it after this long with no repaint and no button, so the slow refresh
+// lands in a pause. Pressing straight through is bounded: at the hard cap the
+// scrub happens on the press after all.
+constexpr uint32_t kIdleScrubMs = 3000;
+constexpr uint8_t kScrubHardCap = 30;
 
 class SceneManager {
  public:
@@ -152,6 +164,7 @@ class SceneManager {
   void requestScrubRepaint() {
     requestFullRepaint();
     _sinceScrub = kScrubAfterRefreshes;
+    _scrubNow = true;  // asked for by name: never left waiting for a pause
   }
 
   // While paused (the nap: the sleep screen is on the glass) no scene paints,
@@ -211,6 +224,8 @@ class SceneManager {
   bool _needFull = false;
   // M2.1a refresh discipline state.
   uint8_t _sinceScrub = 0;   // FAST/PARTIAL refreshes since the last FULL/HALF
+  bool _scrubNow = false;    // custom build: the due scrub runs on the next paint (idle, or asked for)
+  unsigned long _lastDispatchMs = 0;  // custom build: when the last flush was handed to the worker
   // X4, 2026-09-07 (Andrew: "the book gallery and the home screen collide").
   // A windowed update that starts the instant a FULL-PANEL update finishes
   // brings the pre-full image back everywhere outside its window. Proven on

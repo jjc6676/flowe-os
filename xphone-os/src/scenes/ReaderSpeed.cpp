@@ -58,6 +58,8 @@ void ReaderScene::enterSpeed() {
   _spPlaying = false;
   _spNeedWords = true;
   _spNoWords = false;
+  _spNoMem = false;
+  _spCount = 0;
   _spEnd = false;
   _spEdge = 0;
   _wcMode = false;
@@ -73,6 +75,7 @@ void ReaderScene::enterSpeed() {
 void ReaderScene::exitSpeed() {
   _spMode = false;
   _spPlaying = false;
+  speedFreeWords();
   Preferences p;
   if (p.begin(kSpPrefsNs, false)) {
     p.putUShort("wpm", _spWpm);
@@ -81,7 +84,41 @@ void ReaderScene::exitSpeed() {
   markDirty();  // the normal page, at the place speed reading reached
 }
 
+bool ReaderScene::speedEnsureWords() {
+  if (_spOff) return true;
+  constexpr size_t kOffBytes = sizeof(uint16_t) * kSpMaxWords;
+  constexpr size_t kBytes = kOffBytes + kSpPool;
+  auto* block = static_cast<uint8_t*>(malloc(kBytes));
+  if (!block && !_radioSuspended) {
+    // A packaged book that fits beside the radio can leave too little for
+    // the word store. Same trade the reader makes for a page buffer: this
+    // book takes the radio's heap, and onExit brings the radio back.
+    Serial.printf("[xphone-os] speed: no room for %u bytes of words beside the radio (free=%u); "
+                  "radio off for this book\n",
+                  static_cast<unsigned>(kBytes), ESP.getFreeHeap());
+    suspendRadioKeepHeap();  // not the cover scratch: the words need that room
+    block = static_cast<uint8_t*>(malloc(kBytes));
+  }
+  if (!block) {
+    Serial.printf("[xphone-os] speed: no room for %u bytes of words (free=%u)\n",
+                  static_cast<unsigned>(kBytes), ESP.getFreeHeap());
+    return false;
+  }
+  _spOff = reinterpret_cast<uint16_t*>(block);  // malloc alignment covers uint16_t
+  _spPool = reinterpret_cast<char*>(block + kOffBytes);
+  return true;
+}
+
+void ReaderScene::speedFreeWords() {
+  free(_spOff);  // one block: _spPool points into it
+  _spOff = nullptr;
+  _spPool = nullptr;
+  _spCount = 0;
+  _spNeedWords = true;
+}
+
 bool ReaderScene::speedAddWord(const char* w, size_t len) {
+  if (!_spOff) return false;
   while (len > 0 && (*w == ' ' || *w == '\t')) {
     w++;
     len--;
@@ -103,12 +140,25 @@ bool ReaderScene::speedAddWord(const char* w, size_t len) {
 void ReaderScene::speedLoadWords(Gfx& gfx) {
   _spCount = 0;
   _spNoWords = false;
+  // Package books expose word boxes only for the page last drawn, so draw
+  // it into the framebuffer first; renderSpeed() clears it right after.
+  // Before the word store is claimed: the page buffer gets first pick.
+  if (_fbp) renderFbp(gfx);
+  _spNoMem = !speedEnsureWords();
+  if (_spNoMem) {
+    _spNeedWords = false;
+    _spPlaying = false;
+    _spIdx = 0;
+    _spEdge = 0;
+    return;
+  }
   if (_fbp) {
-    // Package books expose word boxes only for the page last drawn, so draw
-    // it into the framebuffer first; renderSpeed() clears it right after.
-    renderFbp(gfx);
     if (!_fbp->hasWordBoxes() || _fbp->wordBoxesPage() != _fbpPage) {
-      _spNoWords = !_fbp->hasWordBoxes();
+      // No boxes on THIS page means a cover or a full-page picture, not a
+      // book that cannot be read word by word: only a package older than v8
+      // has none anywhere. Left at zero words, PLAY and Right move on to the
+      // next page, the same as any other page without text.
+      _spNoWords = !_fbp->carriesWordBoxes();
     } else {
       const uint16_t n = _fbp->pageWords(_wcWords, kMaxPageWords);
       char buf[96];
@@ -149,6 +199,8 @@ void ReaderScene::speedLoadWords(Gfx& gfx) {
     maybeArmPrefetch();  // and the same quiet next-chapter indexing
   }
   _spNeedWords = false;
+  Serial.printf("[xphone-os] speed: %u words on this page%s\n", static_cast<unsigned>(_spCount),
+                _spNoWords ? " (the book carries no word data)" : "");
 
   _spIdx = 0;
   if (_spEdge < 0 && _spCount > 0) {
@@ -251,6 +303,7 @@ void ReaderScene::handleSpeedInput(Input& in) {
     exitSpeed();
     return;
   }
+  if (_spNoMem) return;  // nothing to step through; EXIT is the only way on
   if (in.wasPressed(Btn::Confirm)) {
     if (_spNoWords) return;
     if (_spEnd) {  // at the end: OK leaves, the page view has the finish flow
@@ -311,6 +364,11 @@ void ReaderScene::renderSpeed(Gfx& gfx) {
 
   const int midY = kSpHeaderH + (h - Scene::SOFTKEY_BAR_H - kSpHeaderH) * 2 / 5;
 
+  if (_spNoMem) {
+    gfx.drawTextCentered(kFontBold, cx, midY - gfx.lineHeight(kFontBold), "Not enough memory");
+    gfx.drawTextCentered(kFontRegular, cx, midY + 8, "Close the book and open it again.");
+    return;
+  }
   if (_spNoWords) {
     gfx.drawTextCentered(kFontBold, cx, midY - gfx.lineHeight(kFontBold), "Can't speed read this book");
     gfx.drawTextCentered(kFontRegular, cx, midY + 8, "Send it from the Flowe app again.");
