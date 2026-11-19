@@ -7,6 +7,7 @@ extern bool gDeviceIsX3;  // BoardConfig detect, defined in main.cpp
 
 #include <Arduino.h>
 
+#include "CpuBoost.h"
 #include "Fonts.h"
 #include "scenes/AppScenes.h"
 #include "scenes/HomeScene.h"
@@ -260,6 +261,17 @@ void SceneManager::loop(Input& in, Gfx& gfx) {
   } else {
     _active->handleInput(in);
   }
+  // custom build: the ghost scrub is due and the device has gone quiet (no
+  // repaint and no button for kIdleScrubMs), so run it now, in the pause,
+  // instead of on the next press. The scene repaints itself for it: the
+  // framebuffer may hold something else (the reader lends it out).
+  if (_sinceScrub >= kScrubAfterRefreshes && !_scrubNow && !_flushInFlight && !_paused &&
+      !_active->isDirty() && _active->scrubWhenIdle() && !_active->suppressRepaint() &&
+      millis() - _lastDispatchMs >= kIdleScrubMs && in.msSinceActivity() >= kIdleScrubMs) {
+    Serial.printf("[xphone-os] idle scrub after %u quick refreshes\n", _sinceScrub);
+    _scrubNow = true;
+    _active->markDirty();
+  }
   renderIfDirty(gfx);
 }
 // (E2 press-invert feedback was tried and REMOVED: a release landing while the
@@ -346,12 +358,18 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
   // Scenes always compose the COMPLETE frame — the dirty rect only narrows
   // the glass refresh window, so the framebuffer stays a full frame (which
   // the partial paths stream their window rows from).
-  gfx.clear();
-  _active->render(gfx);
-  // The tabs sit against the PHYSICAL button edge in both orientations —
-  // rotating the panel does not move the buttons. drawSoftKeyBar picks the
-  // horizontal or vertical layout from the current orientation.
-  drawSoftKeyBar(gfx, _active->softKeys(), _active->longPressSlots(), _active->softKeyIconMask());
+  {
+    // custom build: drawing a frame is pure CPU work between the press and
+    // the refresh, so it runs at 160 MHz like the reader's page compose and
+    // parks again before the flush (depth-counted: nested guards are fine).
+    CpuBoost boost;
+    gfx.clear();
+    _active->render(gfx);
+    // The tabs sit against the PHYSICAL button edge in both orientations —
+    // rotating the panel does not move the buttons. drawSoftKeyBar picks the
+    // horizontal or vertical layout from the current orientation.
+    drawSoftKeyBar(gfx, _active->softKeys(), _active->longPressSlots(), _active->softKeyIconMask());
+  }
   const unsigned long t1 = millis();
 
   const bool rectUsable = !dirtyAll && !rect.empty() &&
@@ -369,7 +387,10 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
     req = gDeviceIsX3 ? FlushReq::Full : FlushReq::Half;
     _sinceScrub = 0;
     _bootFlushes++;
-  } else if (_sinceScrub >= kScrubAfterRefreshes) {
+  } else if (_sinceScrub >= kScrubAfterRefreshes &&
+             (_scrubNow || !_active->scrubWhenIdle() || _sinceScrub >= kScrubHardCap)) {
+    // custom build: a scene that allows it waits for a pause (loop() sets
+    // _scrubNow) or the hard cap; the others scrub on this press as before.
     req = FlushReq::Half;  // periodic ghost scrub (CrossPoint cadence)
     _sinceScrub = 0;
     if (_bootFlushes < kConditioningFlushes) _bootFlushes++;
@@ -396,6 +417,7 @@ void SceneManager::renderIfDirty(Gfx& gfx) {
 
   _active->clearDirty();
   _needFull = false;
+  _scrubNow = false;
   _deferredBehindFullPanel = false;
   _composeMs = t1 - t0;
   gRefreshStats.drawMs = _composeMs;
@@ -428,6 +450,7 @@ void SceneManager::ensureFlushTask(Gfx& gfx) {
 void SceneManager::dispatchFlush(const FlushReq req, const XpRect& rect) {
   _flushReq = req;
   _flushRect = rect;
+  _lastDispatchMs = millis();
   _flushInFlight = true;
   xTaskNotifyGive(_flushTask);
 }
